@@ -17,8 +17,14 @@ import (
 	"k8s.io/client-go/util/homedir"
 )
 
+var (
+	commitHash = "unknown"
+	buildDate  = "unknown"
+)
+
 func main() {
 	fmt.Println("faros - a k8s ingress-controller")
+	fmt.Printf("        commit=%s,build_date=%s\n", commitHash, buildDate)
 
 	cl := initK8sClient()
 	w := Watcher{client: cl, onChange: func(payload *Payload) {
