@@ -3,6 +3,7 @@ module github.com/bjorngylling/faros
 go 1.17
 
 require (
+	github.com/bep/debounce v1.2.0
 	github.com/magefile/mage v1.11.0
 	k8s.io/api v0.22.2
 	k8s.io/apimachinery v0.22.2

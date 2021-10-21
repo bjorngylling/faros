@@ -2,91 +2,44 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"k8s.io/client-go/rest"
-
-	"k8s.io/client-go/tools/cache"
-
-	v1 "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/informers"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 )
 
-// Payload is a collection of Kubernetes data loaded by the watcher.
-type Payload struct {
-	Ingresses       []IngressPayload
-	TLSCertificates map[string]*tls.Certificate
-}
-
-// IngressPayload is an ingress + its service ports.
-type IngressPayload struct {
-	Ingress      *v1.Ingress
-	ServicePorts map[string]map[string]int
-}
-
-// Watcher watches for ingresses in the kubernetes cluster
-type Watcher struct {
-	client   kubernetes.Interface
-	onChange func(*Payload)
-}
-
-func (w *Watcher) Run(ctx context.Context) error {
-	factory := informers.NewSharedInformerFactory(w.client, time.Minute)
-	ingressLister := factory.Networking().V1().Ingresses().Lister()
-
-	onChange := func() {
-		ingresses, err := ingressLister.Ingresses("faros").List(labels.Everything())
-		if err != nil {
-			log.Fatalf("error listing Ingress resources: %s", err)
-		}
-
-		payload := &Payload{}
-		for _, ingress := range ingresses {
-			payload.Ingresses = append(payload.Ingresses, IngressPayload{Ingress: ingress})
-		}
-
-		w.onChange(payload)
-	}
-
-	handler := cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			onChange()
-		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
-			onChange()
-		},
-		DeleteFunc: func(obj interface{}) {
-			onChange()
-		},
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		informer := factory.Networking().V1().Ingresses().Informer()
-		informer.AddEventHandler(handler)
-		informer.Run(ctx.Done())
-		wg.Done()
-	}()
-	wg.Wait()
-
-	return nil
-}
-
 func main() {
 	fmt.Println("faros - a k8s ingress-controller")
 
+	cl := initK8sClient()
+	w := Watcher{client: cl, onChange: func(payload *Payload) {
+		marshal, _ := json.Marshal(payload)
+		fmt.Printf("payload: %s\n", marshal)
+	}}
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
+	defer cancelFunc()
+	err := w.Run(ctx)
+	if err != nil {
+		log.Fatalf("%s", err)
+	}
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	// Block until a signal is received.
+	<-c
+}
+
+func initK8sClient() *kubernetes.Clientset {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		var kubeconfig *string
@@ -107,12 +60,5 @@ func main() {
 		log.Fatalf("failed to create kubernetes client: %s", err)
 	}
 
-	w := Watcher{client: client, onChange: func(payload *Payload) {
-		fmt.Printf("payload: %+v\n", *payload)
-	}}
-
-	err = w.Run(context.Background())
-	if err != nil {
-		log.Fatalf("%s", err)
-	}
+	return client
 }
