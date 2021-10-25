@@ -95,13 +95,13 @@ func (w *Watcher) Run(ctx context.Context) error {
 
 	d := debounce.New(time.Second)
 	handler := cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
+		AddFunc: func(_ interface{}) {
 			d(onChange)
 		},
-		UpdateFunc: func(oldObj, newObj interface{}) {
+		UpdateFunc: func(_, _ interface{}) {
 			d(onChange)
 		},
-		DeleteFunc: func(obj interface{}) {
+		DeleteFunc: func(_ interface{}) {
 			d(onChange)
 		},
 	}
