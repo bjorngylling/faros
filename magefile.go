@@ -3,6 +3,7 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/magefile/mage/sh"
@@ -14,7 +15,14 @@ var (
 )
 
 func Build() error {
-	return sh.RunWith(flagEnv(), "go", "build", "-ldflags", ldflags, packageName)
+	return sh.RunWithV(flagEnv(), "go", "build", "-ldflags", ldflags, packageName)
+}
+
+func DockerBuild() error {
+	return sh.RunWithV(flagEnv(), "docker", "build",
+		"--build-arg", fmt.Sprintf(`LDFLAGS=%s`, ldflags),
+		"--build-arg", fmt.Sprintf(`PACKAGE=%s`, packageName),
+		"-t", "faros:latest", ".")
 }
 
 func Test() error {
