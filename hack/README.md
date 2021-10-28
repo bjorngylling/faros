@@ -1,6 +1,15 @@
-Start a local k3s cluster with some exposed ports
+Start a local kind cluster with some exposed ports
 ```
-k3d cluster create -p 30080-30099:30080-30099@server:0
+cat <<EOF | kind create cluster --config=-
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - containerPort: 8080
+    hostPort: 80
+    protocol: TCP
+EOF
 ```
 
 Create faros namespace
@@ -8,26 +17,19 @@ Create faros namespace
 kubectl create namespace faros
 ```
 
-Register an ingress resource
+Create a nginx deployment, service and ingress
 ```
-cat <<EOF | kubectl apply -f -
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: nginx
-  annotations:
-    ingress.kubernetes.io/ssl-redirect: "false"
-spec:
-  rules:
-  - http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: nginx
-            port:
-              number: 80
-EOF
+kubectl apply -f nginx.yaml
+```
+
+Deploy faros
+```
+kind load docker-image faros:latest
+kubectl apply -f faros.yaml
+```
+
+Delete the cluster
+```
+kind cluster delete
 ```
 

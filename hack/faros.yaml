@@ -1,0 +1,54 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: faros
+  name: faros
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: faros-reader
+rules:
+  - apiGroups: [""]
+    resources: ["services","secrets"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: [ "networking.k8s.io" ]
+    resources: [ "ingresses" ]
+    verbs: [ "get", "watch", "list" ]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: read-services-secrets-ingresses-global
+subjects:
+  - kind: ServiceAccount
+    name: faros
+    namespace: faros
+roleRef:
+  kind: ClusterRole
+  name: faros-reader
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: faros
+  name: faros
+  labels:
+    app: faros
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: faros
+  template:
+    metadata:
+      labels:
+        app: faros
+    spec:
+      serviceAccountName: faros
+      containers:
+        - image: faros:latest
+          imagePullPolicy: Never
+          name: faros
+
