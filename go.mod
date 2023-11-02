@@ -1,6 +1,6 @@
 module github.com/bjorngylling/faros
 
-go 1.17
+go 1.21
 
 require (
 	github.com/bep/debounce v1.2.1

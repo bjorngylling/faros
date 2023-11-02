@@ -5,26 +5,35 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
-
-	"k8s.io/client-go/rest"
-
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/util/homedir"
-)
-
-var (
-	commitHash = "unknown"
-	buildDate  = "unknown"
+	"runtime/debug"
 )
 
 func main() {
+	buildInfo, _ := debug.ReadBuildInfo()
+	var vcsRevision, vcsTime, vcsModified string
+	for _, s := range buildInfo.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			vcsRevision = s.Value
+		case "vcs.time":
+			vcsTime = s.Value
+		case "vcs.modified":
+			vcsModified = s.Value
+		}
+	}
+	if vcsModified == "true" {
+		vcsRevision = ""
+	}
 	fmt.Println("faros - a k8s ingress-controller")
-	fmt.Printf("        commit=%s,build_date=%s\n", commitHash, buildDate)
+	fmt.Printf("        commit=%s,build_date=%s,version=%s\n", vcsRevision, vcsTime, buildInfo.Main.Version)
 
 	cl := initK8sClient()
 	w := Watcher{client: cl, onChange: func(payload *Payload) {
