@@ -1,15 +1,11 @@
 Start a local kind cluster with some exposed ports
 ```
-cat <<EOF | kind create cluster --config=-
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-- role: control-plane
-  extraPortMappings:
-  - containerPort: 8080
-    hostPort: 80
-    protocol: TCP
-EOF
+kind create cluster --config=kind.yaml
+```
+
+Install the Gateway API resources
+```
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.0.0/standard-install.yaml
 ```
 
 Create faros namespace

@@ -1,58 +1,57 @@
 package main
 
 import (
+	"context"
 	"testing"
 
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	networkingv1 "k8s.io/api/networking/v1"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	listersv1 "k8s.io/client-go/listers/core/v1"
+	"github.com/google/go-cmp/cmp"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	gatev1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
-type serviceNamespaceLister struct{}
-
-func (s serviceNamespaceLister) List(_ labels.Selector) (ret []*corev1.Service, err error) {
-	panic("should not be called")
+type gwStatusUpdater struct {
+	conditions []metav1.Condition
 }
 
-func (s serviceNamespaceLister) Get(_ string) (*corev1.Service, error) {
-	return &corev1.Service{
-		ObjectMeta: v1.ObjectMeta{Name: "svc"},
-		Spec:       corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "http", Port: 80}}},
-	}, nil
+func (g *gwStatusUpdater) UpdateStatus(ctx context.Context, gwClass *gatev1.GatewayClass, _ metav1.UpdateOptions) (*gatev1.GatewayClass, error) {
+	g.conditions = gwClass.Status.Conditions
+	return nil, nil
 }
 
-type serviceLister struct{}
-
-func (s serviceLister) List(_ labels.Selector) (ret []*corev1.Service, err error) {
-	panic("should not be called")
-}
-
-func (s serviceLister) Services(_ string) listersv1.ServiceNamespaceLister {
-	return serviceNamespaceLister{}
-}
-
-func TestIngressPayload_addBackend(t *testing.T) {
-	p := IngressPayload{
-		Ingress:      &networkingv1.Ingress{ObjectMeta: v1.ObjectMeta{Namespace: ""}},
-		ServicePorts: map[string]map[string]int{},
+func TestUpdateGatewayClassStatus(t *testing.T) {
+	updater := &gwStatusUpdater{}
+	before := []metav1.Condition{
+		{
+			Type:               string(gatev1.GatewayClassConditionStatusAccepted),
+			Status:             metav1.ConditionUnknown,
+			LastTransitionTime: metav1.Time{},
+		},
+		{
+			Type:               string(gatev1.GatewayClassConditionStatusSupportedVersion),
+			Status:             metav1.ConditionUnknown,
+			LastTransitionTime: metav1.Time{},
+		},
 	}
-	s := &serviceLister{}
-	ib := networkingv1.IngressBackend{Service: &networkingv1.IngressServiceBackend{Name: "svc"}}
-	p.addBackend(ib, s)
-
-	portMappings, ok := p.ServicePorts["svc"]
-	if !ok {
-		t.Errorf("Service svc missing from IngressPayload.")
+	now := metav1.Now()
+	UpdateGatewayClassStatus(updater, &gatev1.GatewayClass{Status: gatev1.GatewayClassStatus{Conditions: before}}, metav1.Condition{
+		Type:               string(gatev1.GatewayClassConditionStatusAccepted),
+		Status:             metav1.ConditionTrue,
+		LastTransitionTime: now,
+	})
+	got := updater.conditions
+	want := []metav1.Condition{
+		{
+			Type:               string(gatev1.GatewayClassConditionStatusSupportedVersion),
+			Status:             metav1.ConditionUnknown,
+			LastTransitionTime: metav1.Time{},
+		},
+		{
+			Type:               string(gatev1.GatewayClassConditionStatusAccepted),
+			Status:             metav1.ConditionTrue,
+			LastTransitionTime: now,
+		},
 	}
-	port, ok := portMappings["http"]
-	if !ok {
-		t.Errorf("Service svc: missing port named http")
-	}
-	if port != 80 {
-		t.Errorf("Service svc: wrong value for port named http, got=%d, want=%d", port, 80)
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Errorf("UpdateGatewayClassStatus() mismatch (-want +got):\n%s", diff)
 	}
 }

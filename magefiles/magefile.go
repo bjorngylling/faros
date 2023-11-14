@@ -1,10 +1,9 @@
-//go:build mage
-
 package main
 
 import (
 	"fmt"
 	"github.com/magefile/mage/sh"
+	"github.com/magefile/mage/mg"
 )
 
 var (
@@ -13,6 +12,11 @@ var (
 
 func Build() error {
 	return sh.Run("go", "build", packageName)
+}
+
+func Run() error {
+	mg.Deps(Build)
+	return sh.Run("./faros")
 }
 
 func DockerBuild() error {

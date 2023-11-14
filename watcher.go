@@ -2,95 +2,66 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"log"
+	"log/slog"
 	"time"
 
 	"github.com/bep/debounce"
-	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
-	v1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	gatev1 "sigs.k8s.io/gateway-api/apis/v1"
+	gateclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
+	gateinformer "sigs.k8s.io/gateway-api/pkg/client/informers/externalversions"
 )
 
-// Payload is a collection of k8s data loaded by Watcher.
-type Payload struct {
-	Ingresses       []IngressPayload
-	TLSCertificates map[string]*tls.Certificate
-}
+const resyncPeriod = 1 * time.Minute
+const controllerName = "github.com/bjorngylling/faros"
 
-// IngressPayload is an Ingress and its service ports.
-type IngressPayload struct {
-	Ingress      *networkingv1.Ingress
-	ServicePorts map[string]map[string]int
-}
-
-func (p *IngressPayload) addBackend(backend networkingv1.IngressBackend, serviceLister v1.ServiceLister) {
-	svc, err := serviceLister.Services(p.Ingress.Namespace).Get(backend.Service.Name)
-	if err != nil {
-		log.Printf("unknown service %s from ingress %s in namespace %s", backend.Service.Name, p.Ingress.Name, p.Ingress.Namespace)
-	} else {
-		m := make(map[string]int)
-		for _, port := range svc.Spec.Ports {
-			m[port.Name] = int(port.Port)
-		}
-		p.ServicePorts[svc.Name] = m
-	}
-}
-
-// Watcher watches for changes to ingresses, services and secrets in the k8s cluster
+// Watcher reacts resource changes in the k8s cluster
 type Watcher struct {
-	client   kubernetes.Interface
-	onChange func(*Payload)
+	client        kubernetes.Interface
+	gatewayClient gateclient.Interface
+	log           slog.Logger
 }
 
 func (w *Watcher) Run(ctx context.Context) error {
-	factory := informers.NewSharedInformerFactory(w.client, time.Minute)
-	ingressLister := factory.Networking().V1().Ingresses().Lister()
-	secretLister := factory.Core().V1().Secrets().Lister()
-	serviceLister := factory.Core().V1().Services().Lister()
+	factory := informers.NewSharedInformerFactory(w.client, resyncPeriod)
+	_ = factory.Core().V1().Services().Lister()
+
+	gateFactory := gateinformer.NewSharedInformerFactory(w.gatewayClient, resyncPeriod)
+	gatewayClassLister := gateFactory.Gateway().V1().GatewayClasses().Lister()
+	gatewayLister := gateFactory.Gateway().V1().Gateways().Lister()
+	//httpRouteLister := gateFactory.Gateway().V1().HTTPRoutes().Lister()
 
 	onChange := func() {
-		ingresses, err := ingressLister.Ingresses("faros").List(labels.Everything())
+		gwClasses, err := gatewayClassLister.List(labels.Everything())
 		if err != nil {
-			log.Fatalf("error listing ingress resources: %s", err)
+			w.log.Error(err.Error())
 		}
-
-		payload := &Payload{TLSCertificates: map[string]*tls.Certificate{}}
-		for _, ingress := range ingresses {
-			for _, rec := range ingress.Spec.TLS {
-				if rec.SecretName != "" {
-					secret, err := secretLister.Secrets(ingress.Namespace).Get(rec.SecretName)
-					if err != nil {
-						log.Printf("unknown secret %s in namespace %s: %s", rec.SecretName, ingress.Namespace, err)
-						continue
-					}
-					cert, err := tls.X509KeyPair(secret.Data["tls.crt"], secret.Data["tls.key"])
-					if err != nil {
-						log.Printf("unable to parse secret %s in namespace %s: %s", rec.SecretName, ingress.Namespace, err)
-						continue
-					}
-					payload.TLSCertificates[rec.SecretName] = &cert
-				}
-			}
-			ingressPayload := IngressPayload{Ingress: ingress, ServicePorts: make(map[string]map[string]int)}
-			if ingress.Spec.DefaultBackend != nil {
-				ingressPayload.addBackend(*ingress.Spec.DefaultBackend, serviceLister)
-			}
-			for _, rule := range ingress.Spec.Rules {
-				if rule.HTTP == nil {
-					continue
-				}
-				for _, path := range rule.HTTP.Paths {
-					ingressPayload.addBackend(path.Backend, serviceLister)
-				}
-			}
-			payload.Ingresses = append(payload.Ingresses, ingressPayload)
+		gateways, err := gatewayLister.List(labels.Everything())
+		if err != nil {
+			w.log.Error(err.Error())
 		}
-
-		w.onChange(payload)
+		for _, gwClass := range gwClasses {
+			if gwClass.Spec.ControllerName == controllerName {
+				w.log.Info("found GatewayClass", slog.String("name", gwClass.Name), slog.String("namespace", gwClass.Namespace))
+				for _, gateway := range gateways {
+					if gateway.Spec.GatewayClassName == gatev1.ObjectName(gwClass.Name) {
+						w.log.Info("found Gateway", slog.String("name", gateway.Name), slog.String("namespace", gateway.Namespace))
+					}
+				}
+				UpdateGatewayClassStatus(w.gatewayClient.GatewayV1().GatewayClasses(), gwClass,
+					metav1.Condition{
+						Type:               string(gatev1.GatewayClassConditionStatusAccepted),
+						Status:             metav1.ConditionTrue,
+						Reason:             "Handled",
+						Message:            "Handled by Faros",
+						LastTransitionTime: metav1.Now(),
+					})
+			}
+		}
 	}
 
 	d := debounce.New(time.Second)
@@ -106,23 +77,37 @@ func (w *Watcher) Run(ctx context.Context) error {
 		},
 	}
 
-	go func() {
-		informer := factory.Networking().V1().Ingresses().Informer()
-		informer.AddEventHandler(handler)
-		informer.Run(ctx.Done())
-	}()
+	factory.Core().V1().Services().Informer().AddEventHandler(handler)
+	factory.Start(ctx.Done())
 
-	go func() {
-		informer := factory.Core().V1().Services().Informer()
-		informer.AddEventHandler(handler)
-		informer.Run(ctx.Done())
-	}()
+	gateFactory.Gateway().V1().GatewayClasses().Informer().AddEventHandler(handler)
+	gateFactory.Gateway().V1().Gateways().Informer().AddEventHandler(handler)
+	gateFactory.Gateway().V1().HTTPRoutes().Informer().AddEventHandler(handler)
+	gateFactory.Start(ctx.Done())
 
-	go func() {
-		informer := factory.Core().V1().Secrets().Informer()
-		informer.AddEventHandler(handler)
-		informer.Run(ctx.Done())
-	}()
+	return nil
+}
+
+type GatewayClassStatusUpdater interface {
+	UpdateStatus(context.Context, *gatev1.GatewayClass, metav1.UpdateOptions) (*gatev1.GatewayClass, error)
+}
+
+func UpdateGatewayClassStatus(cl GatewayClassStatusUpdater, gwClass *gatev1.GatewayClass, condition metav1.Condition) error {
+	gc := gwClass.DeepCopy()
+	var newConditions []metav1.Condition
+	for _, cond := range gc.Status.Conditions {
+		if cond.Type == condition.Type && cond.Status == condition.Status {
+			return nil
+		}
+		if cond.Type != condition.Type {
+			newConditions = append(newConditions, cond)
+		}
+	}
+	gc.Status.Conditions = append(newConditions, condition)
+	_, err := cl.UpdateStatus(context.Background(), gc, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

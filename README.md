@@ -1,2 +1,2 @@
 # faros
-Kubernetes ingress-controller
+Kubernetes gateway-controller
