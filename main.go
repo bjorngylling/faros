@@ -35,7 +35,10 @@ func main() {
 		vcsRevision = ""
 	}
 	logger := *slog.New(slog.Default().Handler())
-	logger.LogAttrs(nil, slog.LevelInfo, "faros - a k8s ingress-controller", slog.String("build_revision", vcsRevision), slog.String("build_time", vcsTime), slog.String("build_version", buildInfo.Main.Version))
+	logger.LogAttrs(nil, slog.LevelInfo, "faros - a k8s ingress-controller",
+		slog.String("build_revision", vcsRevision),
+		slog.String("build_time", vcsTime),
+		slog.String("build_version", buildInfo.Main.Version))
 
 	cl, gwCl, err := initK8sClient()
 	if err != nil {
