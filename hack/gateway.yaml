@@ -24,7 +24,7 @@ spec:
   parentRefs:
   - name: public
   hostnames:
-  - "Bjorns-MacBook-Pro.local"
+  - "bjorns-macbook-pro.local"
   rules:
   - backendRefs:
     - name: example-svc

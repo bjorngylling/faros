@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -48,6 +49,11 @@ func main() {
 	if err != nil {
 		logger.Error(err.Error())
 	}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "Hello world!")
+	})
+	http.ListenAndServe(":80", nil)
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
