@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/bep/debounce"
@@ -26,14 +27,14 @@ type Watcher struct {
 	log           slog.Logger
 }
 
-func (w *Watcher) Run(ctx context.Context) error {
+func (w *Watcher) Run(ctx context.Context, routeAdder func(*gatev1.HTTPRoute)) error {
 	factory := informers.NewSharedInformerFactory(w.client, resyncPeriod)
 	_ = factory.Core().V1().Services().Lister()
 
 	gateFactory := gateinformer.NewSharedInformerFactory(w.gatewayClient, resyncPeriod)
 	gatewayClassLister := gateFactory.Gateway().V1().GatewayClasses().Lister()
 	gatewayLister := gateFactory.Gateway().V1().Gateways().Lister()
-	//httpRouteLister := gateFactory.Gateway().V1().HTTPRoutes().Lister()
+	httpRouteLister := gateFactory.Gateway().V1().HTTPRoutes().Lister()
 
 	onChange := func() {
 		gwClasses, err := gatewayClassLister.List(labels.Everything())
@@ -44,12 +45,33 @@ func (w *Watcher) Run(ctx context.Context) error {
 		if err != nil {
 			w.log.Error(err.Error())
 		}
+		var gateway *gatev1.Gateway
+		httpRoutes, err := httpRouteLister.List(labels.Everything())
+		if err != nil {
+			w.log.Error(err.Error())
+		}
 		for _, gwClass := range gwClasses {
 			if gwClass.Spec.ControllerName == controllerName {
-				w.log.Info("found GatewayClass", slog.String("name", gwClass.Name), slog.String("namespace", gwClass.Namespace))
-				for _, gateway := range gateways {
-					if gateway.Spec.GatewayClassName == gatev1.ObjectName(gwClass.Name) {
-						w.log.Info("found Gateway", slog.String("name", gateway.Name), slog.String("namespace", gateway.Namespace))
+				w.log.Info("found GatewayClass",
+					slog.String("name", gwClass.Name),
+					slog.String("namespace", gwClass.Namespace))
+				for _, gw := range gateways {
+					if gw.Spec.GatewayClassName == gatev1.ObjectName(gwClass.Name) {
+						w.log.Info("found Gateway",
+							slog.String("name", gw.Name),
+							slog.String("namespace", gw.Namespace))
+						gateway = gw
+					}
+				}
+				for _, route := range httpRoutes {
+					if slices.ContainsFunc(route.Spec.ParentRefs,
+						func(pr gatev1.ParentReference) bool {
+							return pr.Name == gatev1.ObjectName(gateway.Name)
+						}) {
+						w.log.Info("found HTTPRoute",
+							slog.String("name", route.Name),
+							slog.String("namespace", route.Namespace))
+							routeAdder(route)
 					}
 				}
 				UpdateGatewayClassStatus(w.gatewayClient.GatewayV1().GatewayClasses(), gwClass,

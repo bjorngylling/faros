@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
+	gatev1 "sigs.k8s.io/gateway-api/apis/v1"
 	"sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
 )
 
@@ -40,7 +43,19 @@ func main() {
 		slog.String("build_time", vcsTime),
 		slog.String("build_version", buildInfo.Main.Version))
 
-	cl, gwCl, err := initK8sClient()
+	var kubeconfig string
+	if home := homedir.HomeDir(); home != "" {
+		flag.StringVar(&kubeconfig, "kubeconfig", filepath.Join(home, ".kube", "config"),
+			"(optional) absolute path to the kubeconfig file")
+	} else {
+		flag.StringVar(&kubeconfig, "kubeconfig", "",
+			"absolute path to the kubeconfig file")
+	}
+	var port string
+	flag.StringVar(&port, "port", "80", "(optional) listen port")
+	flag.Parse()
+
+	cl, gwCl, err := initK8sClient(kubeconfig)
 	if err != nil {
 		logger.Error(err.Error())
 	}
@@ -48,15 +63,23 @@ func main() {
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
-	err = w.Run(ctx)
+
+	router := Router{table: map[string]*url.URL{}, log: logger}
+	err = w.Run(ctx, router.Add)
 	if err != nil {
 		logger.Error(err.Error())
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "Hello world!")
+		slog.LogAttrs(r.Context(), slog.LevelInfo, "received request",
+			slog.String("path", r.URL.Path))
+
+		httputil.NewSingleHostReverseProxy(router.Route(r.URL.Path)).ServeHTTP(w, r)
 	})
-	http.ListenAndServe(":80", nil)
+	err = http.ListenAndServe(":"+port, nil)
+	if err != nil {
+		logger.Error(err.Error())
+	}
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
@@ -64,18 +87,40 @@ func main() {
 	<-c
 }
 
-func initK8sClient() (*kubernetes.Clientset, *versioned.Clientset, error) {
+type Router struct {
+	table map[string]*url.URL
+	log   slog.Logger
+}
+
+func (r *Router) Add(route *gatev1.HTTPRoute) {
+	var backend *url.URL
+	for _, rule := range route.Spec.Rules {
+		if len(rule.BackendRefs) > 0 {
+			var err error
+			backend, err = url.Parse("http://" + string(rule.BackendRefs[0].Name))
+			if err != nil {
+				r.log.Error(err.Error())
+			}
+			break
+		}
+	}
+	for _, rule := range route.Spec.Rules {
+		if len(rule.Matches) > 0 {
+			for _, m := range rule.Matches {
+				r.table[*m.Path.Value] = backend
+			}
+		}
+	}
+}
+
+func (r *Router) Route(path string) *url.URL {
+	return r.table[path]
+}
+
+func initK8sClient(kubeconfig string) (*kubernetes.Clientset, *versioned.Clientset, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		var kubeconfig *string
-		if home := homedir.HomeDir(); home != "" {
-			kubeconfig = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "(optional) absolute path to the kubeconfig file")
-		} else {
-			kubeconfig = flag.String("kubeconfig", "", "absolute path to the kubeconfig file")
-		}
-		flag.Parse()
-
-		config, err = clientcmd.BuildConfigFromFlags("", *kubeconfig)
+		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
 			return nil, nil, fmt.Errorf("building k8s config: %w", err)
 		}
