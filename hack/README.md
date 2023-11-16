@@ -17,7 +17,7 @@ kubectl apply -f faros.yaml
 
 Deploy a couple of backend services
 ```
-mage -d sample-app/ dockerBuild && kind load docker-image faros:latest
+mage -d sample-app/ dockerBuild && kind load docker-image sample-app:latest
 kubectl apply -f backend.yaml
 ```
 
