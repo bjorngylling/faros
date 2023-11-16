@@ -19,9 +19,11 @@ kind load docker-image faros:latest
 kubectl apply -f faros.yaml
 ```
 
-Create a nginx deployment and service
+Deploy a couple of backend services
 ```
-kubectl apply -f nginx.yaml
+mage -d sample-app/ dockerBuild && kind load docker-image faros:latest
+
+kubectl apply -f backend.yaml
 ```
 
 Delete the cluster

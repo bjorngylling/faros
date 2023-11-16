@@ -19,6 +19,23 @@ spec:
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
+  name: nginx-route
+spec:
+  parentRefs:
+  - name: public
+  hostnames:
+  - "bjorns-macbook-pro.local"
+  rules:
+  - matches:
+    - path:
+        value: "/nginx"
+  - backendRefs:
+    - name: nginx
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
   name: example-route
 spec:
   parentRefs:
@@ -26,6 +43,9 @@ spec:
   hostnames:
   - "bjorns-macbook-pro.local"
   rules:
+  - matches:
+    - path:
+        value: "/sample"
   - backendRefs:
-    - name: example-svc
+    - name: sample-app
       port: 80
