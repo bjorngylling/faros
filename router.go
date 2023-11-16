@@ -45,6 +45,7 @@ func (r *Router) Add(route *gatev1.HTTPRoute) {
 			b, err := url.Parse("http://" + string(backend.Name))
 			if err != nil {
 				r.log.Error(err.Error())
+				continue
 			}
 			backends = append(backends, Backend{url: b})
 		}
