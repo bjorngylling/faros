@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strings"
 
 	"k8s.io/client-go/kubernetes"
@@ -72,14 +73,17 @@ func main() {
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		slog.LogAttrs(r.Context(), slog.LevelInfo, "received request",
-			slog.String("path", r.URL.Path))
-
-		u := router.Route(r.URL.Path)
+		log := logger.With(slog.String("path", r.URL.Path),
+			slog.String("method", r.Method),
+			slog.String("host", r.Host))
+		u := router.Route(r.Host, r.URL.Path)
 		if u == nil {
 			http.NotFound(w, r)
+			log.LogAttrs(r.Context(), slog.LevelInfo, "route not found")
 			return
 		}
+		log.LogAttrs(r.Context(), slog.LevelInfo, "routed successfully",
+			slog.String("target", u.String()))
 		httputil.NewSingleHostReverseProxy(u).ServeHTTP(w, r)
 	})
 	err = http.ListenAndServe(":"+port, nil)
@@ -94,6 +98,7 @@ func main() {
 }
 
 type Route struct {
+	hostnames []string
 	url       *url.URL
 	matchPath string
 	matchType string // Exact or PathPrefix
@@ -105,27 +110,33 @@ type Router struct {
 }
 
 func (r *Router) Add(route *gatev1.HTTPRoute) {
+	var hostnames []string
+	for _, h := range route.Spec.Hostnames {
+		hostnames = append(hostnames, string(h))
+	}
 	for _, rule := range route.Spec.Rules {
-		if len(rule.BackendRefs) > 0 {
-			var err error
-			backend, err := url.Parse("http://" + string(rule.BackendRefs[0].Name))
-			if err != nil {
-				r.log.Error(err.Error())
-			}
-			if len(rule.Matches) > 0 {
-				for _, m := range rule.Matches {
-					rt := Route{url: backend}
-					rt.matchType = string(*m.Path.Type)
-					rt.matchPath = *m.Path.Value
-					r.table = append(r.table, rt)
-				}
-			}
+		if len(rule.BackendRefs) <= 0 {
+			continue
+		}
+		var err error
+		backend, err := url.Parse("http://" + string(rule.BackendRefs[0].Name))
+		if err != nil {
+			r.log.Error(err.Error())
+		}
+		for _, m := range rule.Matches {
+			rt := Route{url: backend, hostnames: hostnames}
+			rt.matchType = string(*m.Path.Type)
+			rt.matchPath = *m.Path.Value
+			r.table = append(r.table, rt)
 		}
 	}
 }
 
-func (r *Router) Route(path string) *url.URL {
+func (r *Router) Route(host string, path string) *url.URL {
 	for _, route := range r.table {
+		if !slices.Contains(route.hostnames, host) {
+			continue
+		}
 		if route.matchType == "Exact" && route.matchPath == path {
 			return route.url
 		}

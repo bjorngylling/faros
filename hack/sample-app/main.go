@@ -11,7 +11,9 @@ import (
 func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		slog.LogAttrs(r.Context(), slog.LevelInfo, "received request",
-			slog.String("path", r.URL.Path))
+			slog.String("path", r.URL.Path),
+			slog.String("method", r.Method),
+			slog.String("host", r.Host))
 		fmt.Fprintf(w, "sample-app%s", r.URL.Path)
 	})
 	http.ListenAndServe(":80", nil)
