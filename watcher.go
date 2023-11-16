@@ -17,7 +17,7 @@ import (
 	gateinformer "sigs.k8s.io/gateway-api/pkg/client/informers/externalversions"
 )
 
-const resyncPeriod = 1 * time.Minute
+const resyncPeriod = 10 * time.Minute
 const controllerName = "github.com/bjorngylling/faros"
 
 // Watcher reacts resource changes in the k8s cluster
