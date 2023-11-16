@@ -13,6 +13,7 @@ spec:
     metadata:
       labels:
         app: nginx
+        segment: backend
     spec:
       containers:
       - image: nginx
@@ -49,6 +50,7 @@ spec:
     metadata:
       labels:
         app: sample-app
+        segment: backend
     spec:
       containers:
       - image: sample-app:latest
