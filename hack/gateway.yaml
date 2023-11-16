@@ -29,7 +29,7 @@ spec:
   - matches:
     - path:
         value: "/nginx"
-  - backendRefs:
+    backendRefs:
     - name: nginx
       port: 80
 ---
@@ -46,6 +46,6 @@ spec:
   - matches:
     - path:
         value: "/sample"
-  - backendRefs:
+    backendRefs:
     - name: sample-app
       port: 80

@@ -93,21 +93,17 @@ type Router struct {
 }
 
 func (r *Router) Add(route *gatev1.HTTPRoute) {
-	var backend *url.URL
 	for _, rule := range route.Spec.Rules {
 		if len(rule.BackendRefs) > 0 {
 			var err error
-			backend, err = url.Parse("http://" + string(rule.BackendRefs[0].Name))
+			backend, err := url.Parse("http://" + string(rule.BackendRefs[0].Name))
 			if err != nil {
 				r.log.Error(err.Error())
 			}
-			break
-		}
-	}
-	for _, rule := range route.Spec.Rules {
-		if len(rule.Matches) > 0 {
-			for _, m := range rule.Matches {
-				r.table[*m.Path.Value] = backend
+			if len(rule.Matches) > 0 {
+				for _, m := range rule.Matches {
+					r.table[*m.Path.Value] = backend
+				}
 			}
 		}
 	}
