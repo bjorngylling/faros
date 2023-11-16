@@ -68,3 +68,5 @@ spec:
       backendRefs:
       - name: sample-app
         port: 80
+      - name: nginx
+        port: 80
