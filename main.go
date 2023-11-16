@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -86,7 +87,7 @@ func main() {
 		httputil.NewSingleHostReverseProxy(u).ServeHTTP(w, r)
 	})
 	err = http.ListenAndServe(":"+port, nil)
-	if err != nil {
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error(err.Error())
 	}
 
