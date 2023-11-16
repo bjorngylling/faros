@@ -45,34 +45,29 @@ func (w *Watcher) Run(ctx context.Context, routeAdder func(*gatev1.HTTPRoute)) e
 		if err != nil {
 			w.log.Error(err.Error())
 		}
-		var gateway *gatev1.Gateway
 		httpRoutes, err := httpRouteLister.List(labels.Everything())
 		if err != nil {
 			w.log.Error(err.Error())
 		}
 		for _, gwClass := range gwClasses {
 			if gwClass.Spec.ControllerName == controllerName {
-				w.log.Info("found GatewayClass",
-					slog.String("name", gwClass.Name),
-					slog.String("namespace", gwClass.Namespace))
 				for _, gw := range gateways {
-					if gw.Spec.GatewayClassName == gatev1.ObjectName(gwClass.Name) {
-						w.log.Info("found Gateway",
-							slog.String("name", gw.Name),
-							slog.String("namespace", gw.Namespace))
-						gateway = gw
+					if gw.Spec.GatewayClassName != gatev1.ObjectName(gwClass.Name) {
+						continue
 					}
-				}
-				for _, route := range httpRoutes {
-					if slices.ContainsFunc(route.Spec.ParentRefs,
-						func(pr gatev1.ParentReference) bool {
-							return pr.Name == gatev1.ObjectName(gateway.Name)
-						}) {
-						w.log.Info("found HTTPRoute",
-							slog.String("name", route.Name),
-							slog.String("namespace", route.Namespace))
+					gwMatcher := createGatewayMatcher(gw)
+					routeCount := 0
+					for _, route := range httpRoutes {
+						if slices.ContainsFunc(route.Spec.ParentRefs, gwMatcher) {
 							routeAdder(route)
+							routeCount++
+						}
 					}
+					w.log.Info("handled gateway",
+						slog.String("gateway_class", gwClass.Name),
+						slog.String("name", gw.Name),
+						slog.String("namespace", gw.Namespace),
+						slog.Int("route_count", routeCount))
 				}
 				UpdateGatewayClassStatus(w.gatewayClient.GatewayV1().GatewayClasses(), gwClass,
 					metav1.Condition{
@@ -108,6 +103,12 @@ func (w *Watcher) Run(ctx context.Context, routeAdder func(*gatev1.HTTPRoute)) e
 	gateFactory.Start(ctx.Done())
 
 	return nil
+}
+
+func createGatewayMatcher(gateway *gatev1.Gateway) func(gatev1.ParentReference) bool {
+	return func(pr gatev1.ParentReference) bool {
+		return pr.Name == gatev1.ObjectName(gateway.Name)
+	}
 }
 
 type GatewayClassStatusUpdater interface {

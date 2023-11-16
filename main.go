@@ -116,7 +116,7 @@ func (r *Router) Add(route *gatev1.HTTPRoute) {
 	}
 	for _, rule := range route.Spec.Rules {
 		if len(rule.BackendRefs) <= 0 {
-			continue
+			continue // Rules without a backendref are ignored
 		}
 		var err error
 		backend, err := url.Parse("http://" + string(rule.BackendRefs[0].Name))
