@@ -37,13 +37,12 @@ func main() {
 		}
 	}
 	if vcsModified == "true" {
-		vcsRevision = ""
+		vcsRevision += "-modified"
 	}
 	logger := *slog.New(slog.Default().Handler())
 	logger.LogAttrs(nil, slog.LevelInfo, "faros - a k8s ingress-controller",
 		slog.String("build_revision", vcsRevision),
-		slog.String("build_time", vcsTime),
-		slog.String("build_version", buildInfo.Main.Version))
+		slog.String("build_time", vcsTime))
 
 	var kubeconfig string
 	if home := homedir.HomeDir(); home != "" {
