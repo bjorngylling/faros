@@ -16,7 +16,7 @@ func Build() error {
 
 func Run() error {
 	mg.Deps(Build)
-	return sh.Run("./faros")
+	return sh.Run("./faros", "-port", "8080")
 }
 
 func DockerBuild() error {
