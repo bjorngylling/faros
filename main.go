@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -64,7 +65,7 @@ func main() {
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	defer cancelFunc()
 
-	router := Router{table: map[string]*url.URL{}, log: logger}
+	router := Router{log: logger}
 	err = w.Run(ctx, router.Add)
 	if err != nil {
 		logger.Error(err.Error())
@@ -74,7 +75,12 @@ func main() {
 		slog.LogAttrs(r.Context(), slog.LevelInfo, "received request",
 			slog.String("path", r.URL.Path))
 
-		httputil.NewSingleHostReverseProxy(router.Route(r.URL.Path)).ServeHTTP(w, r)
+		u := router.Route(r.URL.Path)
+		if u == nil {
+			http.NotFound(w, r)
+			return
+		}
+		httputil.NewSingleHostReverseProxy(u).ServeHTTP(w, r)
 	})
 	err = http.ListenAndServe(":"+port, nil)
 	if err != nil {
@@ -87,8 +93,14 @@ func main() {
 	<-c
 }
 
+type Route struct {
+	url       *url.URL
+	matchPath string
+	matchType string // Exact or PathPrefix
+}
+
 type Router struct {
-	table map[string]*url.URL
+	table []Route
 	log   slog.Logger
 }
 
@@ -102,7 +114,10 @@ func (r *Router) Add(route *gatev1.HTTPRoute) {
 			}
 			if len(rule.Matches) > 0 {
 				for _, m := range rule.Matches {
-					r.table[*m.Path.Value] = backend
+					rt := Route{url: backend}
+					rt.matchType = string(*m.Path.Type)
+					rt.matchPath = *m.Path.Value
+					r.table = append(r.table, rt)
 				}
 			}
 		}
@@ -110,7 +125,15 @@ func (r *Router) Add(route *gatev1.HTTPRoute) {
 }
 
 func (r *Router) Route(path string) *url.URL {
-	return r.table[path]
+	for _, route := range r.table {
+		if route.matchType == "Exact" && route.matchPath == path {
+			return route.url
+		}
+		if route.matchType == "PathPrefix" && strings.HasPrefix(path, route.matchPath) {
+			return route.url
+		}
+	}
+	return nil
 }
 
 func initK8sClient(kubeconfig string) (*kubernetes.Clientset, *versioned.Clientset, error) {

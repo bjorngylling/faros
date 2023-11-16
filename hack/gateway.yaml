@@ -28,6 +28,7 @@ spec:
   rules:
   - matches:
     - path:
+        type: "Exact"
         value: "/nginx"
     backendRefs:
     - name: nginx
